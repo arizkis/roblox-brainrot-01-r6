@@ -41,23 +41,41 @@ local function buildStocked(recipe, mutation): Model
 end
 
 -- Clear whatever is placed/carried so a stage always composes the same scene.
+-- Tolerant of stale saved state: a bad drop or entry warns and is skipped, never errors out the stage.
 local function clearBoard(player: Player)
 	if GameState.GetCarrying(player) then
-		Carry.DropCarried(player, "stage")
+		local ok, err = pcall(Carry.DropCarried, player, "stage")
+		if not ok then
+			warn("[CaptureStage] clearBoard: DropCarried failed: " .. tostring(err))
+		end
 	end
 	for _, entry in ipairs(table.clone(GameState.GetPlaced(player))) do
-		Economy.RemovePlaced(player, entry.CharacterId)
+		if entry.Model == nil then
+			print("[CaptureStage] clearBoard: skipped stale placed entry " .. tostring(entry.CharacterId))
+			continue
+		end
+		local ok, err = pcall(Economy.RemovePlaced, player, entry.CharacterId)
+		if not ok then
+			warn("[CaptureStage] clearBoard: RemovePlaced failed: " .. tostring(err))
+		end
 	end
 end
 
 -- The developed booth: $2.5M, 2 rebirths, six showcase characters earning on pads.
 local function stageDevelopedBooth(player: Player)
 	clearBoard(player)
-	ensureBooth(player)
+	local booth = ensureBooth(player)
+	print("[CaptureStage] CoverHeist booth: " .. tostring(booth and booth.Index or "nil"))
 	Economy.AddCash(player, 2500000)
+	print("[CaptureStage] CoverHeist cash: " .. tostring(GameState.GetCash(player)))
 	while GameState.GetRebirths(player) < 2 do
 		Rebirth.ApplyRebirth(player)
 	end
+	-- Guarantee six pads before stocking; rebirths grant pads, capped at 8 rebirths.
+	while GameState.GetPadsOwned(player) < 6 and GameState.GetRebirths(player) < 8 do
+		Rebirth.ApplyRebirth(player)
+	end
+	print("[CaptureStage] CoverHeist rebirths: " .. tostring(GameState.GetRebirths(player)) .. ", pads: " .. tostring(GameState.GetPadsOwned(player)))
 	local stock = {
 		{ GameConfig.CastByTier.Mythic[1], GameConfig.GetMutation("Void") },
 		{ GameConfig.CastByTier.Legendary[1], GameConfig.GetMutation("Rainbow") },
@@ -66,9 +84,14 @@ local function stageDevelopedBooth(player: Player)
 		{ GameConfig.CastByTier.Mythic[2], GameConfig.GetMutation("Glitch") },
 		{ GameConfig.CastByTier.Divine[1], nil },
 	}
+	local padCount = math.min(6, GameState.GetPadsOwned(player))
 	for padIndex, pair in ipairs(stock) do
+		if padIndex > padCount then
+			break
+		end
 		local model = buildStocked(pair[1], pair[2])
-		Economy.PlaceOnPad(player, model, padIndex) -- records the index find too
+		local placed = Economy.PlaceOnPad(player, model, padIndex) -- records the index find too
+		print("[CaptureStage] CoverHeist pad " .. padIndex .. ": " .. tostring(placed))
 	end
 end
 
@@ -83,11 +106,13 @@ function CaptureStage.StageCoverHeist(arg)
 
 	local carryModel = buildStocked(GameConfig.CastByTier.Mythic[3], GameConfig.GetMutation("Glitch"))
 	Carry.AttachCarried(player, carryModel)
+	print("[CaptureStage] CoverHeist carry attached")
 	local character = player.Character
 	if character then
 		character:PivotTo(CFrame.new(0, 3, 20)) -- mid-plaza; the human walks it home
 	end
 	Tsunami.StartTsunamiWarning()
+	print("[CaptureStage] CoverHeist tsunami warning started")
 	print("[CaptureStage] CoverHeist staged for " .. player.Name)
 end
 
@@ -206,9 +231,12 @@ pcall(function()
 		command.PrimaryAlias = entry.alias
 		command.Parent = TextChatService
 		command.Triggered:Connect(function(textSource)
-			pcall(function()
+			local ok, err = pcall(function()
 				runIfOwner(Players:GetPlayerByUserId(textSource.UserId), entry.stage)
 			end)
+			if not ok then
+				warn(string.format("[CaptureStage] %s failed: %s", entry.alias, tostring(err)))
+			end
 		end)
 	end
 	-- Legacy chat fallback: the trimmed message must exactly equal an alias.
@@ -217,7 +245,12 @@ pcall(function()
 			local trimmed = message:match("^%s*(.-)%s*$")
 			for _, entry in stages do
 				if trimmed == entry.alias then
-					runIfOwner(player, entry.stage)
+					local ok, err = pcall(function()
+						runIfOwner(player, entry.stage)
+					end)
+					if not ok then
+						warn(string.format("[CaptureStage] %s failed: %s", entry.alias, tostring(err)))
+					end
 					break
 				end
 			end
