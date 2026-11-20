@@ -185,4 +185,44 @@ function CaptureStage.StageIndexAndRebirth(arg)
 	print("[CaptureStage] IndexAndRebirth staged for " .. player.Name)
 end
 
+-- Owner-only chat triggers for the staging functions above (screenshot capture). The whole hookup
+-- sits in pcall: a chat-API failure must never break the module or the game.
+pcall(function()
+	local TextChatService = game:GetService("TextChatService")
+	local stages = {
+		{ name = "StageCoverCommand", alias = "!cover", stage = CaptureStage.StageCoverHeist },
+		{ name = "StageConveyorCommand", alias = "!conveyor", stage = CaptureStage.StageConveyorLineup },
+		{ name = "StageRaidCommand", alias = "!raid", stage = CaptureStage.StageThiefRaid },
+		{ name = "StageIndexCommand", alias = "!index", stage = CaptureStage.StageIndexAndRebirth },
+	}
+	local function runIfOwner(player, stage)
+		if player and player.Name == "0xcing" then
+			stage(player)
+		end
+	end
+	for _, entry in stages do
+		local command = Instance.new("TextChatCommand")
+		command.Name = entry.name
+		command.PrimaryAlias = entry.alias
+		command.Parent = TextChatService
+		command.Triggered:Connect(function(textSource)
+			pcall(function()
+				runIfOwner(Players:GetPlayerByUserId(textSource.UserId), entry.stage)
+			end)
+		end)
+	end
+	-- Legacy chat fallback: the trimmed message must exactly equal an alias.
+	Players.PlayerChatted:Connect(function(player, message)
+		pcall(function()
+			local trimmed = message:match("^%s*(.-)%s*$")
+			for _, entry in stages do
+				if trimmed == entry.alias then
+					runIfOwner(player, entry.stage)
+					break
+				end
+			end
+		end)
+	end)
+end)
+
 return CaptureStage

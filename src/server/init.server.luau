@@ -16,6 +16,7 @@ local StealLock = require(script:WaitForChild("StealLock"))
 local RaccoonThieves = require(script:WaitForChild("RaccoonThieves"))
 local Rebirth = require(script:WaitForChild("Rebirth"))
 local Upgrades = require(script:WaitForChild("Upgrades"))
+require(script:WaitForChild("CaptureStage")) -- loads the owner-only screenshot staging chat commands
 
 local world = WorldBuilder.BuildWorld()
 
